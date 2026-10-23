@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Roleta — Giovanna Matos</title>
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body data-nav="roulette">
+<main id="app"><div class="wrap" style="padding-top:20px;"><p class="note">Carregando...</p></div></main>
+
+<script src="/js/app.js"></script>
+<script>
+(async function () {
+  const { esc, api, money, dateBR, rewardDescription, REWARD_TYPES } = App;
+  const session = await App.initPublic();
+  const app = document.getElementById("app");
+  if (!session || session.type !== "buyer") { location.href = "/conta?next=" + encodeURIComponent("/roleta"); return; }
+
+  const cfg = await api("/roulette");
+  let me = await api("/me");
+
+  if (!cfg.enabled || cfg.prizes.length < 2) {
+    app.innerHTML = '<div class="wrap" style="padding-top:14px;">' + App.emptyState("Roleta indisponível", "A roleta de prêmios não está ativa no momento.", "/conta", "Voltar") + "</div>";
+    return;
+  }
+
+  function spinsLabel() {
+    const n = me.spins.available;
+    return `Você tem <b style="color:var(--orange)">${n}</b> giro${n !== 1 ? "s" : ""} disponível${n !== 1 ? "is" : ""}.`;
+  }
+
+  function myPrizesHTML() {
+    const logs = me.prizes.filter((l) => l.status !== "none");
+    if (!logs.length) return '<p class="note" style="margin-top:24px;">Você ainda não ganhou nenhum prêmio na roleta.</p>';
+    return `<h3 style="font-size:15px;margin:26px 0 10px;">🎁 Seus prêmios da roleta</h3>` + logs.map((l) => {
+      const isReward = REWARD_TYPES.includes(l.prizeType);
+      let action = "";
+      if (l.status === "used") action = '<span class="state won">✅ Já usado</span>';
+      else if (l.status === "redeemed") action = '<span class="state won">✅ Resgatado</span>';
+      else if (isReward && l.status === "active") action = '<span class="state available">Ativo — vale na próxima compra</span>';
+      else if (isReward && l.status === "pending") action = `<button class="btn btn-primary btn-sm" data-redeem="${esc(l.id)}">Resgatar agora</button>`;
+      else action = '<button class="btn btn-primary btn-sm" data-wa="' + esc(l.prizeLabel) + '">Resgatar no WhatsApp</button>';
+      return `
+        <div class="prize-item ${l.status === "used" || l.status === "redeemed" ? "is-won" : ""}">
+          <span class="label grow">${esc(l.prizeLabel)}<br><span style="font-size:11px;color:var(--text-faint);font-weight:500;">${isReward ? esc(rewardDescription(l.prizeType, l.prizeValue)) + " · " : ""}${dateBR(l.createdAt)}</span></span>
+          ${action}
+        </div>`;
+    }).join("");
+  }
+
+  app.innerHTML = `
+    <div class="wrap" style="padding-top:14px;max-width:420px;">
+      <div class="breadcrumb"><a href="/conta">Meus títulos</a> / Roleta</div>
+      <div class="section-title">🎡 Roleta da sorte</div>
+      <div class="section-sub" id="spinsLeft">${spinsLabel()}</div>
+      <div class="wheel-wrap">
+        <div class="wheel-pointer"></div>
+        <div class="wheel-disc" id="wheelDisc">${App.wheelSVG(cfg.prizes)}</div>
+        <div class="wheel-hub">🎯</div>
+      </div>
+      <button class="btn btn-primary btn-block" id="spinBtn"></button>
+      <p class="note center" style="margin-top:10px;">Compre a partir de ${money(cfg.minValue)} em qualquer campanha pra ganhar giros — o dobro desse valor dá o dobro de giros, e assim por diante.</p>
+      <div class="spin-result" id="spinResult" style="display:none;">
+        <span style="font-size:13px;color:var(--text-soft);">Você ganhou:</span>
+        <div class="prize-name" id="spinResultLabel"></div>
+        <p class="note" id="spinResultNote"></p>
+      </div>
+      <div id="msg"></div>
+      <div id="myPrizes"></div>
+    </div>`;
+
+  let waNumber = "";
+  try { waNumber = ((await api("/social-links")).whatsapp || "").replace(/\D/g, ""); } catch (_) {}
+
+  function bindPrizes() {
+    document.getElementById("myPrizes").innerHTML = myPrizesHTML();
+    document.querySelectorAll("[data-redeem]").forEach((b) => (b.onclick = async () => {
+      b.disabled = true;
+      try {
+        await api("/roulette/redeem", { method: "POST", body: { spinLogId: b.dataset.redeem } });
+        App.toast("Prêmio resgatado! Vai ser aplicado sozinho na sua próxima compra. 🎁");
+        me = await api("/me"); bindPrizes();
+      } catch (e) { b.disabled = false; document.getElementById("msg").innerHTML = '<div class="alert">' + esc(e.message) + "</div>"; }
+    }));
+    document.querySelectorAll("[data-wa]").forEach((b) => (b.onclick = () => {
+      if (!waNumber) { App.toast("A organização ainda não cadastrou um WhatsApp."); return; }
+      window.open("https://wa.me/" + waNumber + "?text=" + encodeURIComponent('Oi! Ganhei o prêmio "' + b.dataset.wa + '" na roleta e quero resgatar.'), "_blank");
+    }));
+  }
+
+  const btn = document.getElementById("spinBtn");
+  function refreshBtn() {
+    document.getElementById("spinsLeft").innerHTML = spinsLabel();
+    btn.disabled = me.spins.available <= 0;
+    btn.textContent = me.spins.available > 0 ? "Girar agora" : "Sem giros disponíveis";
+  }
+  refreshBtn(); bindPrizes();
+
+  let rotation = 0, spinning = false;
+  btn.onclick = async () => {
+    if (spinning) return;
+    spinning = true; btn.disabled = true; btn.textContent = "Girando...";
+    document.getElementById("spinResult").style.display = "none";
+    document.getElementById("msg").innerHTML = "";
+    let r;
+    try { r = await api("/roulette/spin", { method: "POST" }); }
+    catch (e) { spinning = false; refreshBtn(); document.getElementById("msg").innerHTML = '<div class="alert">' + esc(e.message) + "</div>"; return; }
+
+    // O resultado já foi decidido pelo servidor; aqui só fazemos a roleta parar na fatia certa.
+    const per = 360 / r.totalPrizes, center = r.prizeIndex * per + per / 2;
+    rotation += 360 * 5 + (360 - center) - (rotation % 360);
+    document.getElementById("wheelDisc").style.transform = `rotate(${rotation}deg)`;
+
+    setTimeout(async () => {
+      if (r.prizeType !== "none") App.confetti();
+      document.getElementById("spinResultLabel").textContent = r.prizeLabel;
+      document.getElementById("spinResultNote").textContent =
+        r.prizeType === "none" ? "Não foi dessa vez — tente de novo!" :
+        REWARD_TYPES.includes(r.prizeType) ? "Resgate abaixo para usar na próxima compra." : "Resgate abaixo pelo WhatsApp.";
+      document.getElementById("spinResult").style.display = "block";
+      me = await api("/me"); refreshBtn(); bindPrizes(); spinning = false;
+    }, 4200);
+  };
+})();
+</script>
+</body>
+</html>

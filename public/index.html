@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Giovanna Matos — Rifas online</title>
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body data-nav="home" data-social="1">
+<main id="app"><div class="wrap" style="padding-top:20px;"><p class="note">Carregando...</p></div></main>
+
+<script src="/js/app.js"></script>
+<script>
+(async function () {
+  const { esc, api, mediaTag, CAL_ICON, dateBR } = App;
+  const rafflesReq = api("/raffles"); // começa a buscar já, junto com o cabeçalho
+  rafflesReq.catch(() => {});
+  await App.initPublic();
+  const app = document.getElementById("app");
+
+  let raffles = [];
+  try { raffles = await rafflesReq; }
+  catch (e) { app.innerHTML = '<div class="wrap">' + App.emptyState("Não foi possível carregar", e.message) + "</div>"; return; }
+
+  // A campanha ativa mais recente vira a principal; as outras ficam na lista.
+  const active = raffles.filter((r) => r.status === "active");
+  const featured = active[0];
+  const others = raffles.filter((r) => !featured || r.id !== featured.id);
+
+  function row(r) {
+    const finished = r.status === "finished";
+    const pct = Math.round((r.soldCount / r.totalNumbers) * 100);
+    return `
+      <a href="/rifa?id=${esc(r.id)}" class="crow">
+        <div class="thumb">${mediaTag(r)}</div>
+        <div class="info">
+          <h3>${esc(r.title)}</h3>
+          <div class="status">${finished ? (r.winnerName ? "Ganhador: " + esc(r.winnerName) : "Sorteio realizado") : pct + "% vendido"}</div>
+        </div>
+        <div class="meta">
+          <span class="pill ${finished ? "" : "live"}">${finished ? "Concluído" : "Ativo"}</span>
+          <div class="date">${CAL_ICON} ${dateBR(r.drawDate)}</div>
+        </div>
+      </a>`;
+  }
+
+  app.innerHTML = `
+    <div class="wrap" style="padding-top:14px;">
+      <div class="section-title">⚡ Campanhas <span style="color:var(--text-faint);font-weight:600;font-size:13px;">— Escolha sua sorte</span></div>
+      ${raffles.length === 0 ? App.emptyState("Nenhuma campanha ativa no momento", "Volte em breve — novas campanhas chegam por aqui.") : `
+      <div class="hero-and-list">
+        <div>
+          ${featured ? `
+          <a href="/rifa?id=${esc(featured.id)}" style="display:block;">
+            <div class="hero-banner ${featured.photoUrl ? "has-photo" : ""}">
+              <div class="art">${mediaTag(featured)}</div>
+              <div class="overlay"><div class="tag-row">
+                <span class="tag">PRÊMIO PRINCIPAL</span>
+                <span class="tag alt">${esc(App.firstWord(featured.title))} DISPONÍVEL</span>
+              </div></div>
+            </div>
+          </a>
+          <div class="campaign-title">
+            <h2>${esc(featured.title)}</h2>
+            <div class="status">${esc(App.firstWord(featured.title))} DISPONÍVEL</div>
+            <span class="status-pill">RESULTADO NOS PRÓXIMOS DIAS</span>
+          </div>` : ""}
+        </div>
+        <div><div class="clist">${others.map(row).join("")}</div></div>
+      </div>`}
+    </div>`;
+})();
+</script>
+</body>
+</html>

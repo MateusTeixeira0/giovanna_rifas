@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ganhadores — Giovanna Matos</title>
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body data-nav="winners">
+<main id="app"><div class="wrap" style="padding-top:14px;"><p class="note">Carregando...</p></div></main>
+<script src="/js/app.js"></script>
+<script>
+(async function () {
+  const { esc, api, pad6, dateBR, TROPHY_ICON } = App;
+  await App.initPublic();
+  const data = await api("/winners").catch(() => ({ main: [], instant: [] }));
+  document.getElementById("app").innerHTML = `
+    <div class="wrap" style="padding-top:14px;">
+      <div class="section-title">🏆 Ganhadores</div>
+      <div class="section-sub">Transparência total: veja quem já foi sorteado ou premiado nas nossas campanhas.</div>
+
+      <h3 style="font-size:15px;margin:22px 0 10px;">Sorteios principais</h3>
+      ${data.main.length ? data.main.map((r) => `
+        <div class="winner-card">
+          <div class="wicon">${TROPHY_ICON}</div>
+          <div>
+            <b>${esc(r.winnerName)}</b>
+            <div class="wsub">Ganhou "${esc(r.title)}" com o título ${pad6(r.winnerNumber)} — ${dateBR(r.drawDate)}${r.federalConcurso ? " · Loteria Federal, concurso " + esc(r.federalConcurso) : ""}</div>
+          </div>
+        </div>`).join("") : '<p class="note">Ainda não realizamos nenhum sorteio principal.</p>'}
+
+      <h3 style="font-size:15px;margin:26px 0 10px;">Prêmios instantâneos</h3>
+      ${data.instant.length ? data.instant.map((p) => `
+        <div class="winner-card">
+          <div class="wicon">🎁</div>
+          <div>
+            <b>${esc(p.winnerName)}</b>
+            <div class="wsub">Ganhou "${esc(p.label)}" na campanha ${esc(p.raffleTitle)} — título ${pad6(p.number)}</div>
+          </div>
+        </div>`).join("") : '<p class="note">Nenhum título premiado foi resgatado ainda.</p>'}
+    </div>`;
+})();
+</script>
+</body>
+</html>

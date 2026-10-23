@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Criar campanha — Admin</title>
+<meta name="robots" content="noindex">
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body data-admin="nova">
+<main id="app"></main>
+<script src="/js/app.js"></script>
+<script src="/js/admin.js"></script>
+<script>
+(async function () {
+  const { esc, api } = App;
+  const body = await App.initAdmin();
+  if (!body) return;
+
+  body.innerHTML = `
+    <div class="form-card">
+      <h3 style="margin-bottom:16px;">Criar nova campanha</h3>
+      <p class="note" style="margin:-8px 0 12px;">Ao publicar, a campanha nova vira a principal da tela inicial (a anterior desce para a lista).</p>
+      <div class="field"><label>Foto do produto</label>
+        <label class="photo-drop" id="photoDrop">
+          <input type="file" id="fPhoto" accept="image/*">
+          <span id="photoDropText">📷 Clique para escolher uma imagem (JPG ou PNG)</span>
+          <img id="photoPreview" class="photo-preview">
+        </label>
+      </div>
+      <div class="field"><label>Título</label><input id="fTitle" placeholder="Ex: PlayStation 5"></div>
+      <div class="field"><label>Descrição / regulamento</label><textarea id="fDesc" placeholder="Descreva o prêmio e as regras..."></textarea></div>
+      <div class="field"><label>Tipo de prêmio (usado só quando não há foto)</label>
+        <select id="fType"><option value="gift">Outro</option><option value="cash">Dinheiro</option><option value="phone">Celular</option><option value="tv">Eletrônico</option><option value="moto">Moto</option><option value="car">Carro</option></select>
+      </div>
+      <div class="form-grid">
+        <div class="field"><label>Preço por título (R$)</label><input id="fPrice" type="number" min="0.01" step="0.01" value="0.99"></div>
+        <div class="field"><label>Total de títulos</label><input id="fTotal" type="number" min="10" step="1" value="5000"></div>
+      </div>
+      <div class="field"><label>Data do sorteio</label><input id="fDate" type="date"></div>
+
+      <h3 style="margin:22px 0 4px;font-size:15px;">🎁 Promoção por quantidade (opcional)</h3>
+      <p class="note" style="margin:0 0 8px;">Ex: "a partir de 100 títulos, pague R$ 0,35 cada".</p>
+      ${[1, 2, 3].map((i) => `<div class="form-grid"><div class="field"><label>A partir de (títulos)</label><input id="tMin${i}" type="number" min="2" placeholder="Ex: ${i * 100}"></div><div class="field"><label>Preço por título (R$)</label><input id="tPrice${i}" type="number" min="0.01" step="0.01"></div></div>`).join("")}
+
+      <h3 style="margin:22px 0 4px;font-size:15px;">⏱️ Promoção relâmpago (opcional)</h3>
+      <div class="field"><label>Título da promoção</label><input id="flLabel" placeholder="Ex: Menor título valendo R$ 20.000"></div>
+      <div class="field"><label>Texto explicando</label><input id="flText" placeholder="Ex: Comprou acima de R$30 e encontrou o menor título leva R$ 20.000"></div>
+      <div class="field"><label>Duração (minutos a partir da publicação)</label><input id="flMin" type="number" min="1" placeholder="Ex: 60"></div>
+
+      <div id="formMsg"></div>
+      <button class="btn btn-primary btn-block" id="createBtn" style="margin-top:18px;">Publicar campanha</button>
+    </div>`;
+
+  // Reduz a foto no próprio navegador antes de enviar (fica leve, sem perder o formato original).
+  let photo = null;
+  document.getElementById("fPhoto").onchange = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const img = new Image();
+      img.onload = () => {
+        const scale = Math.min(1, 1200 / img.width);
+        const c = document.createElement("canvas");
+        c.width = Math.round(img.width * scale); c.height = Math.round(img.height * scale);
+        c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+        photo = c.toDataURL("image/jpeg", 0.85);
+        const pv = document.getElementById("photoPreview");
+        pv.src = photo; pv.style.display = "block";
+        document.getElementById("photoDropText").style.display = "none";
+      };
+      img.src = ev.target.result;
+    };
+    reader.readAsDataURL(file);
+  };
+
+  document.getElementById("createBtn").onclick = async () => {
+    const v = (id) => document.getElementById(id).value.trim();
+    const msg = document.getElementById("formMsg");
+    msg.innerHTML = "";
+    const tiers = [1, 2, 3].map((i) => ({ minQty: v("tMin" + i), price: v("tPrice" + i) })).filter((t) => t.minQty && t.price);
+    const payload = {
+      title: v("fTitle"), description: v("fDesc"), prizeType: v("fType"), photoUrl: photo,
+      basePrice: v("fPrice"), totalNumbers: v("fTotal"), drawDate: v("fDate") || null, tiers,
+      flash: v("flLabel") && v("flMin") ? { label: v("flLabel"), text: v("flText"), minutes: v("flMin") } : null,
+    };
+    const btn = document.getElementById("createBtn");
+    btn.disabled = true;
+    try {
+      const out = await api("/admin/raffles", { method: "POST", body: payload });
+      App.toast("Campanha publicada!");
+      location.href = "/admin/rifa?id=" + out.id;
+    } catch (e) {
+      btn.disabled = false;
+      msg.innerHTML = '<div class="alert">' + esc(e.message) + "</div>";
+    }
+  };
+})();
+</script>
+</body>
+</html>

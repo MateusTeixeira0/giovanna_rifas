@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Participantes — Admin</title>
+<meta name="robots" content="noindex">
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body data-admin="participantes">
+<main id="app"></main>
+<script src="/js/app.js"></script>
+<script src="/js/admin.js"></script>
+<script>
+(async function () {
+  const { esc, api, money, dateBR } = App;
+  const body = await App.initAdmin();
+  if (!body) return;
+  const d = await api("/admin/participants");
+  const total = d.rows.filter((r) => r.status === "paid").reduce((s, r) => s + r.totalPrice, 0);
+
+  function draw(filter) {
+    const q = (filter || "").trim().toLowerCase();
+    const rows = d.rows.filter((t) => !q || [t.buyerName, t.buyerEmail, t.buyerPhone, t.raffleTitle].some((x) => String(x || "").toLowerCase().includes(q)));
+    body.innerHTML = `
+      <div class="kpis">
+        <div class="kpi"><span>Participantes únicos</span><b>${d.uniqueBuyers}</b></div>
+        <div class="kpi"><span>Compras registradas</span><b>${d.rows.length}</b></div>
+        <div class="kpi"><span>Total arrecadado</span><b>${money(total)}</b></div>
+        <div class="kpi"><span>Resultado da busca</span><b>${rows.length}</b></div>
+      </div>
+      <div class="field" style="max-width:340px;"><label>Buscar por nome, e-mail, telefone ou campanha</label><input id="searchInput" placeholder="Ex: Maria, gmail.com, Hilux..." value="${esc(filter || "")}"></div>
+      <div class="table-scroll"><table class="admin-table" style="margin-top:16px;">
+        <thead><tr><th>Comprador</th><th>E-mail</th><th>Telefone</th><th>Campanha</th><th>Títulos</th><th>Valor</th><th>Data</th><th>Status</th></tr></thead>
+        <tbody>${rows.length ? rows.map((t) => `
+          <tr>
+            <td><b>${esc(t.buyerName)}</b></td><td>${esc(t.buyerEmail)}</td><td>${esc(t.buyerPhone || "—")}</td>
+            <td>${esc(t.raffleTitle)}</td><td>${t.quantity}</td><td>${money(t.totalPrice)}</td><td>${dateBR(t.createdAt)}</td>
+            <td>${t.status === "paid" ? '<span class="badge paid">Pago</span>' : '<span class="badge red">Conflito</span>'}</td>
+          </tr>`).join("") : '<tr><td colspan="8" style="text-align:center;color:var(--text-faint);padding:22px;">Nenhum participante encontrado.</td></tr>'}
+        </tbody>
+      </table></div>`;
+    const el = document.getElementById("searchInput");
+    el.oninput = (e) => draw(e.target.value);
+    if (filter) { el.focus(); el.setSelectionRange(el.value.length, el.value.length); }
+  }
+  draw("");
+})();
+</script>
+</body>
+</html>

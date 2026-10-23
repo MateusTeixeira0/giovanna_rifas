@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Roleta — Admin</title>
+<meta name="robots" content="noindex">
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body data-admin="roleta">
+<main id="app"></main>
+<script src="/js/app.js"></script>
+<script src="/js/admin.js"></script>
+<script>
+(async function () {
+  const { esc, api, money, dateTimeBR, rewardDescription } = App;
+  const body = await App.initAdmin();
+  if (!body) return;
+
+  const TYPE_LABEL = { none: "Sem prêmio", percent: "% de desconto", amount: "R$ de desconto", tickets: "Títulos grátis", manual: "Prêmio manual (ex: Pix)" };
+  const STATUS = {
+    pending: '<span class="badge pending">Ganhou, não resgatou</span>',
+    active: '<span class="badge pending">Resgatado (vale na próxima compra)</span>',
+    used: '<span class="badge paid">Usado numa compra</span>',
+    redeemed: '<span class="badge paid">Entregue</span>',
+    none: '<span class="badge">Sem prêmio</span>',
+  };
+  function prizeDesc(p) {
+    if (p.type === "percent") return p.value + "% de desconto";
+    if (p.type === "amount") return money(p.value) + " de desconto";
+    if (p.type === "tickets") return p.value + " título(s) grátis";
+    if (p.type === "manual") return "entregue por você" + (p.value ? " (" + money(p.value) + ")" : "");
+    return "sem prêmio";
+  }
+  function valueField(type, value) {
+    if (type === "none") return "";
+    const label = { percent: "Desconto (%)", amount: "Desconto (R$)", tickets: "Quantidade de títulos grátis", manual: "Valor (R$, opcional)" }[type];
+    return `<div class="field"><label>${label}</label><input id="pValue" type="number" min="0" step="${type === "amount" || type === "manual" ? "0.01" : "1"}" value="${value || ""}"></div>`;
+  }
+
+  async function draw() {
+    const d = await api("/admin/roulette");
+    const cfg = d.config;
+    body.innerHTML = `
+      <div class="form-card" style="margin-bottom:22px;">
+        <h3 style="margin-bottom:14px;">Configuração da roleta</h3>
+        <label class="inline-check" style="margin:0 0 16px;"><input type="checkbox" id="rEnabled" ${cfg.enabled ? "checked" : ""}> Roleta ativa no site</label>
+        <div class="form-grid">
+          <div class="field"><label>Valor mínimo de compra (R$)</label><input id="rMin" type="number" min="0" step="1" value="${cfg.minValue}"></div>
+          <div class="field"><label>Giros ganhos por compra qualificada</label><input id="rSpins" type="number" min="1" step="1" value="${cfg.spinsPerMultiple}"></div>
+        </div>
+        <div id="cfgMsg"></div>
+        <button class="btn btn-primary" id="saveCfg" style="margin-top:14px;">Salvar configuração</button>
+        <p class="note" style="margin-top:10px;">Quem comprar esse valor ou mais numa única compra ganha giro(s) automaticamente. Comprando o dobro do valor mínimo, ganha o dobro de giros; o triplo, o triplo — e assim por diante.</p>
+      </div>
+
+      <h3 style="font-size:16px;margin-bottom:6px;">🎁 Prêmios da roleta</h3>
+      <p class="note" style="margin-bottom:14px;">Cada prêmio ocupa uma fatia igual da roleta (precisa de pelo menos 2). Descontos e títulos grátis o próprio comprador resgata e são aplicados sozinhos na compra seguinte.</p>
+      ${d.prizes.map((p) => `
+        <div class="prize-item">
+          <span class="label grow">${esc(p.label)}<br><span style="font-size:11px;color:var(--text-faint);font-weight:500;">${esc(prizeDesc(p))}</span></span>
+          <button class="btn btn-ghost btn-sm" data-edit="${esc(p.id)}">Editar</button>
+          <button class="btn btn-ghost btn-sm" data-delp="${esc(p.id)}" title="Remover">✕</button>
+        </div>`).join("") || '<p class="note">Nenhum prêmio cadastrado.</p>'}
+
+      <div class="form-card" style="margin-top:16px;margin-bottom:26px;" id="prizeForm"></div>
+
+      <h3 style="font-size:16px;margin:22px 0 12px;">Histórico de giros</h3>
+      <div class="table-scroll"><table class="admin-table">
+        <thead><tr><th>Comprador</th><th>Contato</th><th>Prêmio</th><th>Data</th><th>Status</th><th></th></tr></thead>
+        <tbody>${d.log.length ? d.log.map((l) => `
+          <tr>
+            <td>${esc(l.name)}</td>
+            <td>${esc(l.email)}<br><span style="color:var(--text-faint);font-size:12px;">${esc(l.phone)}</span></td>
+            <td>${esc(l.prizeLabel)}</td>
+            <td>${dateTimeBR(l.createdAt)}</td>
+            <td>${STATUS[l.status] || esc(l.status)}</td>
+            <td>${l.prizeType === "manual" && (l.status === "pending" || l.status === "active") ? `<button class="btn btn-ghost btn-sm" data-redeem="${esc(l.id)}">Marcar como entregue</button>` : ""}</td>
+          </tr>`).join("") : '<tr><td colspan="6" style="text-align:center;color:var(--text-faint);padding:22px;">Ninguém girou a roleta ainda.</td></tr>'}
+        </tbody>
+      </table></div>`;
+
+    document.getElementById("saveCfg").onclick = async () => {
+      try {
+        await api("/admin/roulette", { method: "PATCH", body: { enabled: document.getElementById("rEnabled").checked, minValue: document.getElementById("rMin").value, spinsPerMultiple: document.getElementById("rSpins").value } });
+        App.toast("Configuração da roleta salva."); draw();
+      } catch (e) { document.getElementById("cfgMsg").innerHTML = '<div class="alert">' + esc(e.message) + "</div>"; }
+    };
+    body.querySelectorAll("[data-redeem]").forEach((b) => (b.onclick = async () => {
+      await api("/admin/roulette/redeem", { method: "PATCH", body: { spinLogId: b.dataset.redeem } }); App.toast("Marcado como entregue."); draw();
+    }));
+    body.querySelectorAll("[data-delp]").forEach((b) => (b.onclick = () => App.modal({
+      message: "Remover este prêmio da roleta?", confirmLabel: "Remover",
+      onConfirm: async () => { await api("/admin/roulette/prizes/" + b.dataset.delp, { method: "DELETE" }); draw(); },
+    })));
+    body.querySelectorAll("[data-edit]").forEach((b) => (b.onclick = () => showForm(d.prizes.find((p) => p.id === b.dataset.edit))));
+    showForm(null);
+
+    // Formulário de adicionar/editar prêmio
+    function showForm(prize) {
+      const form = document.getElementById("prizeForm");
+      const cur = prize || { label: "", type: "percent", value: "" };
+      form.innerHTML = `
+        <h3 style="margin-bottom:14px;font-size:15px;">${prize ? "Editar prêmio" : "Adicionar prêmio"}</h3>
+        <div class="field"><label>Nome que aparece na roleta</label><input id="pLabel" placeholder="Ex: 10% de desconto" value="${esc(cur.label)}"></div>
+        <div class="field"><label>Tipo de prêmio</label>
+          <select id="pType">${Object.keys(TYPE_LABEL).map((t) => `<option value="${t}" ${t === cur.type ? "selected" : ""}>${TYPE_LABEL[t]}</option>`).join("")}</select>
+        </div>
+        <div id="pValueWrap">${valueField(cur.type, cur.value)}</div>
+        <div id="pMsg"></div>
+        <div class="row-actions" style="margin-top:12px;">
+          <button class="btn btn-primary" id="pSave">${prize ? "Salvar alterações" : "Adicionar à roleta"}</button>
+          ${prize ? '<button class="btn btn-ghost" id="pCancel">Cancelar</button>' : ""}
+        </div>`;
+      document.getElementById("pType").onchange = (e) => { document.getElementById("pValueWrap").innerHTML = valueField(e.target.value, ""); };
+      if (prize) document.getElementById("pCancel").onclick = () => showForm(null);
+      document.getElementById("pSave").onclick = async () => {
+        const v = document.getElementById("pValue");
+        const payload = { label: document.getElementById("pLabel").value, type: document.getElementById("pType").value, value: v ? v.value : 0 };
+        try {
+          if (prize) await api("/admin/roulette/prizes/" + prize.id, { method: "PATCH", body: payload });
+          else await api("/admin/roulette/prizes", { method: "POST", body: payload });
+          App.toast(prize ? "Prêmio atualizado." : "Prêmio adicionado à roleta."); draw();
+        } catch (e) { document.getElementById("pMsg").innerHTML = '<div class="alert">' + esc(e.message) + "</div>"; }
+      };
+      if (prize) form.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  }
+  draw().catch((e) => (body.innerHTML = '<div class="alert">' + esc(e.message) + "</div>"));
+})();
+</script>
+</body>
+</html>

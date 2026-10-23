@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Painel — Giovanna Matos</title>
+<meta name="robots" content="noindex">
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body data-admin="dashboard">
+<main id="app"></main>
+<script src="/js/app.js"></script>
+<script src="/js/admin.js"></script>
+<script>
+(async function () {
+  const { esc, api, money } = App;
+  const body = await App.initAdmin();
+  if (!body) return;
+
+  async function draw() {
+    const d = await api("/admin/overview");
+    body.innerHTML = `
+      <div class="kpis">
+        <div class="kpi"><span>Campanhas ativas</span><b>${d.totals.active}</b></div>
+        <div class="kpi"><span>Encerradas</span><b>${d.totals.finished}</b></div>
+        <div class="kpi"><span>Títulos vendidos</span><b>${d.totals.sold}</b></div>
+        <div class="kpi"><span>Arrecadado</span><b>${money(d.totals.revenue)}</b></div>
+      </div>
+      <div class="table-scroll">
+      <table class="admin-table">
+        <thead><tr><th>Campanha</th><th>Vendidos</th><th>Arrecadado</th><th>Status</th><th></th></tr></thead>
+        <tbody>${d.raffles.length ? d.raffles.map((r) => `
+          <tr>
+            <td><b>${esc(r.title)}</b></td>
+            <td>${r.soldCount}/${r.totalNumbers} (${((r.soldCount / r.totalNumbers) * 100).toFixed(1)}%)</td>
+            <td>${money(r.revenue)}</td>
+            <td>${r.status === "active" ? '<span class="badge paid">Ativa</span>' : '<span class="badge pending">Encerrada</span>'}</td>
+            <td style="white-space:nowrap;"><a href="/admin/rifa?id=${esc(r.id)}" class="btn btn-ghost btn-sm">Gerenciar</a> <button class="btn btn-ghost btn-sm" data-del="${esc(r.id)}" title="Excluir campanha">🗑️</button></td>
+          </tr>`).join("") : '<tr><td colspan="5" style="text-align:center;color:var(--text-faint);padding:22px;">Nenhuma campanha cadastrada. <a href="/admin/nova" class="link-btn">Criar a primeira</a></td></tr>'}
+        </tbody>
+      </table></div>`;
+    body.querySelectorAll("[data-del]").forEach((b) => (b.onclick = () => {
+      const r = d.raffles.find((x) => x.id === b.dataset.del);
+      AdminUI.confirmDeleteRaffle(r, draw);
+    }));
+  }
+  draw().catch((e) => (body.innerHTML = '<div class="alert">' + esc(e.message) + "</div>"));
+})();
+</script>
+</body>
+</html>

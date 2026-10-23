@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pagamentos — Admin</title>
+<meta name="robots" content="noindex">
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body data-admin="pagamentos">
+<main id="app"></main>
+<script src="/js/app.js"></script>
+<script src="/js/admin.js"></script>
+<script>
+(async function () {
+  const { esc, api, money, dateTimeBR } = App;
+  const body = await App.initAdmin();
+  if (!body) return;
+
+  const MODE = {
+    mercadopago: ['good', '✅ <b>Pix automático ligado (Mercado Pago).</b> Quando o comprador paga, o site confirma sozinho.'],
+    manual: ['warn', '🟡 <b>Pix manual.</b> O QR Code usa a sua chave Pix, mas o site <b>não sabe sozinho</b> quando o dinheiro cai. Confira no app do seu banco e confirme cada pedido na lista abaixo. Para confirmação automática, ligue um gateway (veja o README).'],
+    test: ['warn', '🧪 <b>Modo teste.</b> Nenhuma chave Pix cadastrada: os compradores veem um botão “simular pagamento”. Cadastre sua chave Pix abaixo para gerar cobranças de verdade.'],
+  };
+
+  async function draw() {
+    const s = await api("/admin/settings");
+    const pending = await api("/admin/pending-payments");
+    const p = s.pix, soc = s.social;
+    const [cls, txt] = MODE[s.mode];
+    body.innerHTML = `
+      <div class="mode-box ${cls}">${txt}</div>
+
+      <div class="form-card">
+        <h3 style="margin-bottom:6px;">Configuração de recebimento via Pix</h3>
+        <p class="note" style="margin-bottom:16px;">Usada para gerar o QR Code de cobrança quando o Mercado Pago não está ligado.</p>
+        <div class="form-grid">
+          <div class="field"><label>Tipo de chave</label>
+            <select id="pKeyType">${[["email", "E-mail"], ["cpf", "CPF"], ["cnpj", "CNPJ"], ["telefone", "Telefone"], ["aleatoria", "Chave aleatória"]].map(([v, l]) => `<option value="${v}" ${p.keyType === v ? "selected" : ""}>${l}</option>`).join("")}</select>
+          </div>
+          <div class="field"><label>Chave Pix</label><input id="pKey" placeholder="Sua chave Pix" value="${esc(p.key)}"></div>
+        </div>
+        <p class="note" style="margin-top:-6px;margin-bottom:14px;">Digite a chave exatamente como está no seu banco: CPF/CNPJ só números, telefone com DDD, e-mail normal, ou a chave aleatória completa. Um caractere a mais faz o QR não funcionar.</p>
+        <div class="field"><label>Nome do recebedor</label><input id="pName" placeholder="Nome que aparece pro comprador" value="${esc(p.receiverName)}"></div>
+        <div class="field"><label>Banco / instituição (opcional)</label><input id="pBank" placeholder="Ex: Nubank, Banco do Brasil..." value="${esc(p.bank)}"></div>
+        <button class="btn btn-primary btn-block" id="savePix" style="margin-top:18px;">Salvar dados de recebimento</button>
+      </div>
+
+      <div class="form-card" style="margin-top:20px;">
+        <h3 style="margin-bottom:6px;">Redes sociais</h3>
+        <p class="note" style="margin-bottom:16px;">Esses links aparecem como ícones flutuantes na tela inicial do site.</p>
+        <div class="field"><label>Link do Instagram</label><input id="sIg" placeholder="https://instagram.com/seuusuario" value="${esc(soc.instagram)}"></div>
+        <div class="field"><label>Número do WhatsApp (com DDI e DDD, só números)</label><input id="sWa" placeholder="Ex: 5511999999999" value="${esc(soc.whatsapp)}"></div>
+        <button class="btn btn-primary btn-block" id="saveSocial" style="margin-top:16px;">Salvar redes sociais</button>
+      </div>
+
+      <h3 style="font-size:16px;margin:30px 0 6px;">Pedidos aguardando pagamento</h3>
+      <p class="note" style="margin-bottom:14px;">Pedidos dos últimos 3 dias que ainda não foram pagos. No Pix manual, confirme aqui depois de ver o dinheiro na sua conta. <b>Os números só valem depois de confirmados</b> e ficam reservados por 10 minutos — se o Pix demorar mais que isso e outra pessoa pegar os números, o sistema avisa (“Conflito”).</p>
+      <div class="table-scroll"><table class="admin-table">
+        <thead><tr><th>Comprador</th><th>Campanha</th><th>Títulos</th><th>Valor</th><th>Criado em</th><th>Status</th><th></th></tr></thead>
+        <tbody>${pending.length ? pending.map((t) => `
+          <tr>
+            <td><b>${esc(t.buyerName)}</b><br><span style="color:var(--text-faint);font-size:12px;">${esc(t.buyerPhone)}</span></td>
+            <td>${esc(t.raffleTitle)}</td><td>${t.quantity}</td><td>${money(t.totalPrice)}</td><td>${dateTimeBR(t.createdAt)}</td>
+            <td>${t.status === "conflict" ? '<span class="badge red">Conflito — reembolsar</span>' : (new Date(t.expiresAt) < new Date() ? '<span class="badge">Expirado</span>' : '<span class="badge pending">Aguardando</span>')}</td>
+            <td>${t.status === "pending" ? `<button class="btn btn-dark btn-sm" data-confirm="${esc(t.id)}">Confirmar pagamento</button>` : ""}</td>
+          </tr>`).join("") : '<tr><td colspan="7" style="text-align:center;color:var(--text-faint);padding:22px;">Nenhum pedido pendente.</td></tr>'}
+        </tbody>
+      </table></div>`;
+
+    document.getElementById("savePix").onclick = async () => {
+      try {
+        await api("/admin/settings", { method: "PATCH", body: { pix: { keyType: document.getElementById("pKeyType").value, key: document.getElementById("pKey").value, receiverName: document.getElementById("pName").value, bank: document.getElementById("pBank").value } } });
+        App.toast("Dados de recebimento salvos."); draw();
+      } catch (e) { App.toast(e.message); }
+    };
+    document.getElementById("saveSocial").onclick = async () => {
+      try { await api("/admin/settings", { method: "PATCH", body: { social: { instagram: document.getElementById("sIg").value, whatsapp: document.getElementById("sWa").value } } }); App.toast("Links de redes sociais salvos."); }
+      catch (e) { App.toast(e.message); }
+    };
+    body.querySelectorAll("[data-confirm]").forEach((b) => (b.onclick = () => App.modal({
+      message: "Confirmar que você recebeu este pagamento? Os títulos serão entregues ao comprador.", confirmLabel: "Confirmar pagamento",
+      onConfirm: async () => { try { await api("/admin/tickets/" + b.dataset.confirm + "/confirm", { method: "POST" }); App.toast("Pagamento confirmado."); draw(); } catch (e) { App.toast(e.message); } },
+    })));
+  }
+  draw().catch((e) => (body.innerHTML = '<div class="alert">' + esc(e.message) + "</div>"));
+})();
+</script>
+</body>
+</html>

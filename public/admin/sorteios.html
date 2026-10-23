@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sorteios e prêmios — Admin</title>
+<meta name="robots" content="noindex">
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body data-admin="sorteios">
+<main id="app"></main>
+<script src="/js/app.js"></script>
+<script src="/js/admin.js"></script>
+<script>
+(async function () {
+  const { esc, api, pad6 } = App;
+  const body = await App.initAdmin();
+  if (!body) return;
+
+  async function draw() {
+    const ov = await api("/admin/overview");
+    const raffles = ov.raffles;
+    const details = [];
+    for (const r of raffles) details.push(await api("/admin/raffles/" + r.id));
+
+    body.innerHTML = `
+      <h3 style="font-size:16px;margin-bottom:6px;">🎲 Sorteios</h3>
+      <p class="note" style="margin-bottom:14px;">Realize o sorteio principal de cada campanha quando estiver pronta.</p>
+      <div class="table-scroll"><table class="admin-table">
+        <thead><tr><th>Campanha</th><th>Vendidos</th><th>Status</th><th>Resultado</th><th></th></tr></thead>
+        <tbody>${raffles.length ? raffles.map((r) => `
+          <tr>
+            <td><b>${esc(r.title)}</b></td>
+            <td>${r.soldCount}/${r.totalNumbers}</td>
+            <td>${r.status === "active" ? '<span class="badge paid">Ativa</span>' : '<span class="badge pending">Encerrada</span>'}</td>
+            <td>${r.status === "finished" ? pad6(r.winnerNumber) + " — " + esc(r.winnerName || "") : "—"}</td>
+            <td>${r.status === "active"
+              ? (r.soldCount === 0 ? '<button class="btn btn-dark btn-sm" disabled>Sortear</button>' : `<a class="btn btn-dark btn-sm" href="/admin/sorteio?id=${esc(r.id)}">Sortear</a>`)
+              : `<a href="/admin/rifa?id=${esc(r.id)}" class="btn btn-ghost btn-sm">Ver</a>`}</td>
+          </tr>`).join("") : '<tr><td colspan="5" style="text-align:center;color:var(--text-faint);padding:22px;">Nenhuma campanha.</td></tr>'}
+        </tbody>
+      </table></div>
+
+      <h3 style="font-size:16px;margin:30px 0 6px;">🏆 Títulos Premiados</h3>
+      <p class="note" style="margin-bottom:14px;">São 2 formas de premiar: <b style="color:var(--text)">1) Liberar</b> abre o número pra venda — quem comprar ganha na hora, automaticamente. <b style="color:var(--text)">2) Marcar como ganho</b> é manual, caso você queira declarar o vencedor você mesmo.</p>
+
+      <div class="form-card" style="margin-bottom:22px;" id="addPrizeCard">
+        <h3 style="margin-bottom:14px;font-size:15px;">Adicionar título premiado</h3>
+        <div class="form-grid">
+          <div class="field"><label>Campanha</label><select id="prizeRaffle">${raffles.map((r) => `<option value="${esc(r.id)}">${esc(r.title)}</option>`).join("")}</select></div>
+          ${AdminUI.NUMBER_FIELD}
+        </div>
+        ${AdminUI.ADD_PRIZE_FIELDS}
+      </div>
+
+      <div id="prizeLists">${details.filter((r) => r.prizeTitles.length).map((r) => `
+        <div style="margin-bottom:18px;" data-raffle="${esc(r.id)}">
+          <div style="font-weight:700;font-size:13.5px;color:var(--text-soft);margin-bottom:8px;">${esc(r.title)}</div>
+          ${AdminUI.prizeListHTML(r.id, r.prizeTitles)}
+        </div>`).join("") || '<p class="note">Nenhum título premiado cadastrado ainda.</p>'}</div>`;
+
+    AdminUI.bindPrizeActions(document.getElementById("prizeLists"), draw);
+    if (raffles.length) {
+      const sel = document.getElementById("prizeRaffle");
+      const regen = AdminUI.bindAddPrize(document.getElementById("addPrizeCard"), () => sel.value, draw);
+      sel.onchange = regen;
+    } else document.getElementById("addPrizeBtn").disabled = true;
+  }
+  draw().catch((e) => (body.innerHTML = '<div class="alert">' + esc(e.message) + "</div>"));
+})();
+</script>
+</body>
+</html>

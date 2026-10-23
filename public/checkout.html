@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pagamento — Giovanna Matos</title>
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body data-nav="home">
+<main id="app"><div class="wrap" style="padding-top:20px;"><p class="note">Carregando...</p></div></main>
+
+<script src="/js/app.js"></script>
+<script>
+(async function () {
+  const { esc, api, money } = App;
+  const session = await App.initPublic();
+  const app = document.getElementById("app");
+  const id = App.qs("id");
+  if (!session || session.type !== "buyer") { location.href = "/conta?next=" + encodeURIComponent(location.pathname + location.search); return; }
+
+  let t;
+  try { t = await api("/tickets/" + encodeURIComponent(id)); }
+  catch (e) { app.innerHTML = '<div class="wrap">' + App.emptyState("Pedido não encontrado", e.message, "/", "Ver campanhas") + "</div>"; return; }
+
+  const modeNote = {
+    mercadopago: "Assim que o Pix for pago, esta página confirma sozinha.",
+    manual: "Pague o Pix pelo app do seu banco. A confirmação é feita pela organização — assim que ela confirmar, seus títulos aparecem em “Meus títulos”.",
+    test: "MODO TESTE: nenhum dinheiro de verdade é cobrado. Use o botão abaixo para simular o pagamento.",
+  }[t.mode];
+
+  app.innerHTML = `
+    <div class="wrap" style="padding-top:14px;">
+      <div class="breadcrumb"><a href="/rifa?id=${esc(t.raffleId)}">${esc(t.raffleTitle)}</a> / Pagamento</div>
+      <div class="section-title">Finalize seu pagamento</div>
+      <div class="checkout-grid">
+        <div class="pix-box">
+          <div class="countdown" id="countdown">10:00</div>
+          <div class="qr">${t.pixQr ? `<img src="${esc(t.pixQr)}" alt="QR Code Pix">` : ""}</div>
+          <div class="copiaecola" id="pixCode">${esc(t.pixCopiaECola || "")}</div>
+          <button class="btn btn-ghost btn-sm" id="copyBtn" style="margin-top:10px;">Copiar código Pix</button>
+          ${t.mode === "test" ? '<button class="btn btn-primary btn-block" id="simulateBtn" style="margin-top:16px;">Simular pagamento confirmado</button>' : ""}
+          <p class="note">${esc(modeNote)}</p>
+          <div id="payMsg"></div>
+        </div>
+        <div>
+          <div class="order-summary">
+            <div class="order-line"><span>Campanha</span><span>${esc(t.raffleTitle)}</span></div>
+            <div class="order-line"><span>Títulos</span><span>${t.numbersCount}${t.bonusTickets ? " (inclui " + t.bonusTickets + " grátis)" : ""}</span></div>
+            ${t.discountAmount > 0 ? `<div class="order-line"><span>🎁 Desconto da roleta</span><span>− ${money(t.discountAmount)}</span></div>` : ""}
+            <div class="order-line"><span><b>Total</b></span><span><b>${money(t.totalPrice)}</b></span></div>
+            <p class="note">Seus números são sorteados automaticamente e ficam reservados por 10 minutos enquanto você paga.</p>
+          </div>
+        </div>
+      </div>
+    </div>`;
+
+  document.getElementById("copyBtn").onclick = () => {
+    if (navigator.clipboard) navigator.clipboard.writeText(t.pixCopiaECola || "").catch(() => {});
+    App.toast("Código Pix copiado.");
+  };
+
+  function paidDone() {
+    clearInterval(poll); clearInterval(cd);
+    App.toast("Pagamento confirmado! 🎉");
+    setTimeout(() => (location.href = "/conta?paid=1"), 900);
+  }
+
+  const sim = document.getElementById("simulateBtn");
+  if (sim) sim.onclick = async () => {
+    sim.disabled = true;
+    try { await api("/tickets/" + encodeURIComponent(id) + "/simulate-payment", { method: "POST" }); paidDone(); }
+    catch (e) { sim.disabled = false; document.getElementById("payMsg").innerHTML = '<div class="alert">' + esc(e.message) + "</div>"; }
+  };
+
+  // Contagem regressiva
+  const cdEl = document.getElementById("countdown");
+  const cd = setInterval(() => {
+    const secs = Math.max(0, Math.floor((new Date(t.expiresAt) - Date.now()) / 1000));
+    if (secs <= 0) { cdEl.textContent = "Expirado"; if (sim) sim.disabled = true; return; }
+    cdEl.textContent = String(Math.floor(secs / 60)).padStart(2, "0") + ":" + String(secs % 60).padStart(2, "0");
+  }, 1000);
+
+  // Confere o pagamento a cada 4 segundos
+  const poll = setInterval(async () => {
+    try {
+      const s = await api("/tickets/" + encodeURIComponent(id));
+      if (s.status === "paid") paidDone();
+      if (s.status === "conflict") {
+        clearInterval(poll);
+        document.getElementById("payMsg").innerHTML = '<div class="alert">Seu Pix foi pago depois do tempo, e esses números já foram vendidos. Fale com a organização para o reembolso.</div>';
+      }
+    } catch (_) {}
+  }, 4000);
+})();
+</script>
+</body>
+</html>

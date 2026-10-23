@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sorteio — Admin</title>
+<meta name="robots" content="noindex">
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body data-admin="sorteios">
+<main id="app"></main>
+<script src="/js/app.js"></script>
+<script src="/js/admin.js"></script>
+<script>
+(async function () {
+  const { esc, api, pad6 } = App;
+  const body = await App.initAdmin();
+  if (!body) return;
+  const id = App.qs("id");
+
+  let info;
+  try { info = await api("/admin/draw?raffleId=" + encodeURIComponent(id)); }
+  catch (e) { body.innerHTML = App.emptyState("Campanha não encontrada", e.message, "/admin/sorteios", "Voltar"); return; }
+  const r = info.raffle;
+
+  if (r.status === "finished") {
+    body.innerHTML = `
+      <div class="breadcrumb"><a href="/admin/sorteios">Sorteios</a> / ${esc(r.title)}</div>
+      <div class="draw-box"><span>Sorteio já realizado</span><div class="winner-num">${pad6(r.winnerNumber)}</div><p>Ganhador(a): ${esc(r.winnerName || "—")}</p>${AdminUI.federalInfoHTML(r)}</div>
+      <a href="/admin/sorteios" class="btn btn-ghost" style="margin-top:18px;">← Voltar aos sorteios</a>`;
+    return;
+  }
+
+  body.innerHTML = `
+    <div class="breadcrumb"><a href="/admin/sorteios">Sorteios</a> / ${esc(r.title)}</div>
+    <h3 style="font-size:18px;margin-bottom:4px;">🎰 Sorteio pela Loteria Federal</h3>
+    <p class="note" style="margin-bottom:18px;">Digite o resultado oficial da Loteria Federal. O sistema calcula o número vencedor da campanha e mostra uma prévia antes de você confirmar.</p>
+    <div class="kpis">
+      <div class="kpi"><span>Campanha</span><b style="font-size:15px;">${esc(r.title)}</b></div>
+      <div class="kpi"><span>Títulos pagos</span><b>${info.soldCount}</b></div>
+      <div class="kpi"><span>Participantes</span><b>${info.buyersCount}</b></div>
+    </div>
+    <div class="form-card" style="max-width:100%;margin-bottom:18px;">
+      <h3 style="margin-bottom:12px;font-size:15px;">Resultado da Loteria Federal</h3>
+      <div class="form-grid">
+        <div class="field"><label>Concurso nº</label><input id="fedConcurso" placeholder="Ex: 5987" inputmode="numeric"></div>
+        <div class="field"><label>Data do sorteio</label><input id="fedDate" type="date"></div>
+      </div>
+      <div class="field"><label>Número sorteado (6 dígitos)</label><input class="federal-input" id="fedNumber" inputmode="numeric" maxlength="6" placeholder="000000"></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:4px;">
+        <a href="https://loterias.caixa.gov.br" target="_blank" rel="noopener" class="btn btn-ghost btn-sm">🔗 Abrir site oficial da Caixa</a>
+      </div>
+      <p class="note" style="margin-top:14px;">Se o número sorteado for maior que o total da campanha (${r.totalNumbers}), ele é ajustado ao intervalo (resto da divisão). Se o número apurado não tiver sido vendido, ganha o próximo número vendido, subindo.</p>
+    </div>
+    <div id="fedPreview"></div>
+    <div id="fedMsg"></div>
+    <button class="btn btn-primary btn-block" id="fedConfirm" style="margin-top:14px;" disabled>Confirmar e anunciar ganhador</button>
+    <p class="note center" id="fedHint"></p>`;
+
+  const numberEl = document.getElementById("fedNumber");
+  const concursoEl = document.getElementById("fedConcurso");
+  const dateEl = document.getElementById("fedDate");
+  const previewEl = document.getElementById("fedPreview");
+  const confirmBtn = document.getElementById("fedConfirm");
+  const hintEl = document.getElementById("fedHint");
+  let current = null, token = 0;
+
+  async function update() {
+    const numStr = numberEl.value;
+    current = null;
+    const my = ++token;
+    if (numStr.length !== 6) {
+      previewEl.innerHTML = '<div class="federal-preview">Digite o número sorteado (6 dígitos) pra ver a prévia do ganhador.</div>';
+    } else {
+      try {
+        const res = await api("/admin/draw/preview", { method: "POST", body: { raffleId: r.id, number: numStr } });
+        if (my !== token) return;
+        if (res.final === null) {
+          previewEl.innerHTML = '<div class="federal-preview warn">Nenhum título dessa campanha tem comprador registrado ainda, então não dá pra apurar um ganhador.</div>';
+        } else {
+          current = { numStr, res };
+          previewEl.innerHTML = `
+            <div class="draw-box">
+              <span>Número sorteado na Loteria Federal: <b>${esc(numStr)}</b></span>
+              <div class="winner-num" style="font-size:36px;">${pad6(res.n)}</div>
+              <p class="note" style="color:#EAD9A8;">${res.adjusted ? `Ajustado ao intervalo da campanha (1–${r.totalNumbers}).` : "Número dentro do intervalo da campanha."}</p>
+              ${res.fallback ? `<p>⚠️ Esse número não foi vendido. Pela regra, ganha o próximo vendido:</p><div class="winner-num">${pad6(res.final)}</div>` : "<p>✅ Número vendido!</p>"}
+              <p>Ganhador(a): <b>${esc(res.owner ? res.owner.name : "Participante")}</b>${res.owner ? " (" + esc(res.owner.email) + ")" : ""}</p>
+            </div>`;
+        }
+      } catch (e) { previewEl.innerHTML = '<div class="federal-preview warn">' + esc(e.message) + "</div>"; }
+    }
+    const ready = !!current && concursoEl.value.trim() && dateEl.value;
+    confirmBtn.disabled = !ready;
+    hintEl.textContent = current && !ready ? "Preencha o número do concurso e a data pra liberar a confirmação." : "";
+  }
+
+  numberEl.addEventListener("input", () => { numberEl.value = numberEl.value.replace(/\D/g, "").slice(0, 6); update(); });
+  [concursoEl, dateEl].forEach((el) => el.addEventListener("input", update));
+
+  confirmBtn.onclick = () => {
+    if (!current) return;
+    const { numStr, res } = current;
+    App.modal({
+      message: `Confirmar o sorteio de "${r.title}"? O ganhador será o número ${pad6(res.final)} (${res.owner ? res.owner.name : "Participante"}), com base no concurso ${concursoEl.value.trim()} da Loteria Federal. Isso não pode ser desfeito.`,
+      confirmLabel: "Confirmar sorteio",
+      onConfirm: async () => {
+        try {
+          const out = await api("/admin/draw", { method: "POST", body: { raffleId: r.id, concurso: concursoEl.value.trim(), date: dateEl.value, number: numStr } });
+          App.confetti();
+          App.toast("Sorteio realizado! Ganhador: " + out.winnerName);
+          setTimeout(() => location.reload(), 1200);
+        } catch (e) { document.getElementById("fedMsg").innerHTML = '<div class="alert">' + esc(e.message) + "</div>"; }
+      },
+    });
+  };
+  update();
+})();
+</script>
+</body>
+</html>

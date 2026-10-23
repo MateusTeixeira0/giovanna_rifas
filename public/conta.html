@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Minha conta — Giovanna Matos</title>
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body data-nav="account">
+<main id="app"><div class="wrap" style="padding-top:20px;"><p class="note">Carregando...</p></div></main>
+
+<script src="/js/app.js"></script>
+<script>
+(async function () {
+  const { esc, api, pad6, money, rewardDescription } = App;
+  const session = await App.initPublic();
+  const app = document.getElementById("app");
+  const next = App.qs("next");
+  const safeNext = next && next.startsWith("/") && !next.startsWith("//") ? next : null;
+
+  if (session && session.type === "admin") return renderAdmin();
+  if (session && session.type === "buyer") return renderTickets();
+  renderLogin(App.qs("m") === "cadastro" ? "cadastro" : "entrar");
+
+  /* ---------- Administrador logado ---------- */
+  function renderAdmin() {
+    app.innerHTML = `
+      <div class="wrap" style="padding-top:14px;max-width:460px;">
+        <div class="section-title">Você entrou como administrador</div>
+        <div class="login-card">
+          <a href="/admin/" class="btn btn-primary btn-block">🛠️ Ir para o painel admin</a>
+          <button class="btn btn-ghost btn-block" id="outBtn" style="margin-top:10px;">Sair</button>
+        </div>
+      </div>`;
+    document.getElementById("outBtn").onclick = App.logout;
+  }
+
+  /* ---------- Entrar / Criar conta ---------- */
+  function renderLogin(mode) {
+    let method = "email";
+    const draw = () => {
+      app.innerHTML = `
+        <div class="wrap" style="padding-top:14px;max-width:460px;">
+          <div class="section-title">Acesse sua conta</div>
+          <div class="login-card">
+            <div class="account-tabs">
+              <button data-m="entrar" class="${mode === "entrar" ? "active" : ""}">Entrar</button>
+              <button data-m="cadastro" class="${mode === "cadastro" ? "active" : ""}">Criar conta</button>
+            </div>
+            ${safeNext && mode === "cadastro" ? '<p class="note" style="margin:0 0 12px;">Crie sua conta para finalizar a compra — é rapidinho.</p>' : ""}
+            ${mode === "entrar" ? `
+              <div class="account-tabs" id="methodTabs" style="margin-bottom:4px;">
+                <button data-lm="email" class="${method === "email" ? "active" : ""}">Entrar com e-mail</button>
+                <button data-lm="phone" class="${method === "phone" ? "active" : ""}">Entrar com telefone</button>
+              </div>
+              ${method === "email"
+                ? '<div class="field"><label>E-mail</label><input id="fId" type="email" autocomplete="username" placeholder="voce@email.com"></div>'
+                : '<div class="field"><label>Telefone / WhatsApp</label><input id="fId" inputmode="tel" autocomplete="tel" placeholder="(11) 99999-9999"></div>'}
+              <div class="field"><label>Senha</label><input id="fPass" type="password" autocomplete="current-password" placeholder="••••••••"></div>
+            ` : `
+              <div class="field"><label>Nome</label><input id="fName" autocomplete="name" placeholder="Seu nome completo"></div>
+              <div class="field"><label>E-mail</label><input id="fEmail" type="email" autocomplete="email" placeholder="voce@email.com"></div>
+              <div class="field"><label>Telefone / WhatsApp</label><input id="fPhone" inputmode="tel" placeholder="(11) 99999-9999"></div>
+              <div class="field"><label>Confirmar telefone</label><input id="fPhone2" inputmode="tel" placeholder="Digite o telefone novamente"></div>
+              <div class="field"><label>Senha (mínimo 6 caracteres)</label><input id="fPass" type="password" autocomplete="new-password" placeholder="Crie uma senha"></div>
+            `}
+            <div id="formMsg"></div>
+            <button class="btn btn-primary btn-block" id="submitBtn" style="margin-top:16px;">${mode === "entrar" ? "Entrar" : "Criar minha conta"}</button>
+            <p class="note" style="margin-top:14px;">Ao continuar, você concorda com os <a href="/termos" class="link-btn">Termos de uso</a>.</p>
+          </div>
+        </div>`;
+
+      document.querySelectorAll(".account-tabs button[data-m]").forEach((b) => (b.onclick = () => { mode = b.dataset.m; draw(); }));
+      document.querySelectorAll("#methodTabs button[data-lm]").forEach((b) => (b.onclick = () => { method = b.dataset.lm; draw(); }));
+      app.querySelectorAll("input").forEach((i) => i.addEventListener("keydown", (e) => { if (e.key === "Enter") document.getElementById("submitBtn").click(); }));
+
+      document.getElementById("submitBtn").onclick = async () => {
+        const msg = document.getElementById("formMsg");
+        const btn = document.getElementById("submitBtn");
+        msg.innerHTML = "";
+        const val = (id) => (document.getElementById(id).value || "").trim();
+        try {
+          btn.disabled = true;
+          let out;
+          if (mode === "entrar") {
+            if (!val("fId") || !document.getElementById("fPass").value) throw new Error("Preencha " + (method === "email" ? "e-mail" : "telefone") + " e senha.");
+            out = await api("/auth/login", { method: "POST", body: { identifier: val("fId"), password: document.getElementById("fPass").value } });
+          } else {
+            if (!val("fName") || !val("fEmail") || !val("fPhone") || !document.getElementById("fPass").value) throw new Error("Preencha todos os campos.");
+            out = await api("/auth/signup", { method: "POST", body: { name: val("fName"), email: val("fEmail"), phone: val("fPhone"), phoneConfirm: val("fPhone2"), password: document.getElementById("fPass").value } });
+          }
+          if (out.admin) { location.href = "/admin/"; return; }
+          location.href = safeNext || "/conta";
+        } catch (e) {
+          btn.disabled = false;
+          msg.innerHTML = '<div class="alert">' + esc(e.message) + "</div>";
+        }
+      };
+    };
+    draw();
+  }
+
+  /* ---------- Meus títulos ---------- */
+  async function renderTickets() {
+    let d;
+    try { d = await api("/me"); }
+    catch (e) { if (e.status === 401) return renderLogin("entrar"); app.innerHTML = '<div class="wrap">' + App.emptyState("Erro", e.message) + "</div>"; return; }
+
+    // Comemoração: mostra só uma vez cada vitória nova (guarda no navegador quais já foram mostradas).
+    const seenKey = "gm_seen_wins_" + d.email;
+    let seen = [];
+    try { seen = JSON.parse(localStorage.getItem(seenKey) || "[]"); } catch (_) {}
+    const newWins = [];
+
+    const cards = d.tickets.map((t) => {
+      if (t.wonMain) {
+        const k = "main:" + t.raffleId;
+        if (!seen.includes(k)) { newWins.push(`🏆 Você ganhou a campanha "${esc(t.raffleTitle)}"!`); seen.push(k); }
+      }
+      t.wonPrizes.forEach((p) => {
+        const k = "prize:" + t.raffleId + ":" + p.number;
+        if (!seen.includes(k)) { newWins.push(`🎁 Seu título ${pad6(p.number)} ganhou: ${esc(p.label)}!`); seen.push(k); }
+      });
+      const winning = new Set(t.wonPrizes.map((p) => p.number));
+      if (t.wonMain) winning.add(t.winnerNumber);
+      return `
+        <div class="ticket-card ${t.wonMain || t.wonPrizes.length ? "is-winner" : ""}">
+          <div class="ticket-card-head">
+            <div><b>${esc(t.raffleTitle)}</b><div class="nums">${t.numbers.length} título(s) comprado(s)</div></div>
+            <span class="badge paid">Pago</span>
+          </div>
+          ${t.wonMain ? '<div class="win-banner">🏆 Você ganhou esta campanha!</div>' : ""}
+          ${t.wonPrizes.map((p) => `<div class="win-banner">🎁 Título ${pad6(p.number)} ganhou: ${esc(p.label)}</div>`).join("")}
+          <button class="btn btn-ghost btn-sm toggle-tickets-btn" data-toggle="${esc(t.raffleId)}">Ver todas as cotas ▾</button>
+          <div class="ticket-numbers-full" id="nums-${esc(t.raffleId)}">
+            ${t.numbers.map((n) => `<span class="num-chip ${winning.has(n) ? "is-winning-num" : ""}">${pad6(n)}</span>`).join("")}
+          </div>
+        </div>`;
+    });
+
+    app.innerHTML = `
+      <div class="wrap" style="padding-top:14px;">
+        <div class="section-title" style="justify-content:space-between;">
+          <span>Meus títulos</span>
+          <button class="btn btn-ghost btn-sm" id="outBtn">Sair</button>
+        </div>
+        <div class="section-sub">Olá, ${esc(d.name)} — aqui estão seus números.</div>
+        ${App.qs("paid") ? '<div class="alert ok" style="margin-bottom:14px;">Pagamento confirmado! Seus títulos estão garantidos. 🎉</div>' : ""}
+        ${d.activeReward ? `
+          <div class="reward-banner">
+            <span class="ico">🎁</span>
+            <div style="flex:1;"><b>Benefício ativo: ${esc(d.activeReward.label)}</b><span class="sub">${esc(rewardDescription(d.activeReward.type, d.activeReward.value))} — aplicado automaticamente.</span></div>
+            <a href="/" class="link-btn" style="color:var(--orange);">Comprar ›</a>
+          </div>` : ""}
+        ${d.spins.available > 0 ? `
+          <a href="/roleta" class="roulette-banner">
+            <span>🎡</span>
+            <div><b>Você tem ${d.spins.available} giro${d.spins.available > 1 ? "s" : ""} na roleta!</b><span>Clique pra girar e tentar a sorte</span></div>
+            <span class="arrow">›</span>
+          </a>` : ""}
+        ${cards.length ? cards.join("") : App.emptyState("Você ainda não tem títulos", "Escolha uma campanha e garanta seus números.", "/", "Ver campanhas ativas")}
+      </div>`;
+
+    document.getElementById("outBtn").onclick = App.logout;
+    document.querySelectorAll(".toggle-tickets-btn").forEach((btn) => {
+      btn.onclick = () => {
+        const el = document.getElementById("nums-" + btn.dataset.toggle);
+        const open = el.classList.toggle("open");
+        btn.textContent = open ? "Ocultar cotas ▴" : "Ver todas as cotas ▾";
+      };
+    });
+    if (newWins.length) {
+      try { localStorage.setItem(seenKey, JSON.stringify(seen)); } catch (_) {}
+      setTimeout(() => App.winCelebration(newWins), 300);
+    }
+  }
+})();
+</script>
+</body>
+</html>

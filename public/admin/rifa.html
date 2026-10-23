@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Gerenciar campanha — Admin</title>
+<meta name="robots" content="noindex">
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body data-admin="dashboard">
+<main id="app"></main>
+<script src="/js/app.js"></script>
+<script src="/js/admin.js"></script>
+<script>
+(async function () {
+  const { esc, api, money, pad6 } = App;
+  const body = await App.initAdmin();
+  if (!body) return;
+  const id = App.qs("id");
+
+  async function draw() {
+    let r;
+    try { r = await api("/admin/raffles/" + encodeURIComponent(id)); }
+    catch (e) { body.innerHTML = App.emptyState("Campanha não encontrada", e.message, "/admin/", "Voltar"); return; }
+    const finished = r.status === "finished";
+
+    body.innerHTML = `
+      <div class="breadcrumb" style="display:flex;justify-content:space-between;align-items:center;">
+        <span><a href="/admin/">Painel</a> / ${esc(r.title)}</span>
+        <button class="btn btn-ghost btn-sm" id="delRaffleBtn">🗑️ Excluir campanha</button>
+      </div>
+      <div class="kpis">
+        <div class="kpi"><span>Vendidos</span><b>${r.soldCount}/${r.totalNumbers}</b></div>
+        <div class="kpi"><span>Arrecadado</span><b>${money(r.revenue)}</b></div>
+        <div class="kpi"><span>Participantes</span><b>${r.participants.length}</b></div>
+        <div class="kpi"><span>Status</span><b style="font-size:15px;">${finished ? "Encerrada" : "Ativa"}</b></div>
+      </div>
+      ${finished ? `
+        <div class="draw-box"><span>Número sorteado</span><div class="winner-num">${pad6(r.winnerNumber)}</div><p>Ganhador(a): ${esc(r.winnerName || "—")}</p>${AdminUI.federalInfoHTML(r)}</div>
+      ` : `
+        <div class="form-card" style="margin-bottom:26px;">
+          <h3 style="margin-bottom:10px;">Realizar sorteio</h3>
+          <p class="note" style="margin-bottom:14px;">Abre a tela de sorteio pela Loteria Federal: você digita o resultado oficial e o sistema apura o ganhador.</p>
+          <a href="/admin/sorteio?id=${esc(r.id)}" class="btn btn-dark ${r.soldCount === 0 ? "hidden" : ""}">🎰 Sortear pela Loteria Federal</a>
+          ${r.soldCount === 0 ? '<p class="note">Disponível quando houver ao menos um título pago.</p>' : ""}
+        </div>`}
+
+      <h3 style="margin:22px 0 12px;font-size:15px;">🏆 Títulos premiados</h3>
+      <p class="note" style="margin-bottom:14px;"><b style="color:var(--text)">Retido</b> = ninguém vê e ninguém consegue comprar o número. <b style="color:var(--text)">Liberar</b> = aparece como "Disponível" pra todos; quem comprar esse número ganha automaticamente. Você também pode usar "Marcar como ganho" manualmente.</p>
+      <div id="prizeList">${AdminUI.prizeListHTML(r.id, r.prizeTitles)}</div>
+
+      <div class="form-card" style="margin-top:16px;margin-bottom:26px;" id="addPrizeCard">
+        <h3 style="margin-bottom:14px;font-size:15px;">Adicionar título premiado</h3>
+        ${AdminUI.NUMBER_FIELD}
+        ${AdminUI.ADD_PRIZE_FIELDS}
+      </div>
+
+      <h3 style="margin:22px 0 12px;font-size:15px;">Participantes</h3>
+      <div class="table-scroll"><table class="admin-table">
+        <thead><tr><th>Nome</th><th>E-mail</th><th>Telefone</th><th>Títulos</th></tr></thead>
+        <tbody>${r.participants.length ? r.participants.map((p) => `<tr><td>${esc(p.name)}</td><td>${esc(p.email)}</td><td>${esc(p.phone || "—")}</td><td>${p.qty}</td></tr>`).join("")
+          : '<tr><td colspan="4" style="text-align:center;color:var(--text-faint);padding:22px;">Nenhum título vendido ainda.</td></tr>'}</tbody>
+      </table></div>`;
+
+    document.getElementById("delRaffleBtn").onclick = () => AdminUI.confirmDeleteRaffle(r, () => (location.href = "/admin/"));
+    AdminUI.bindPrizeActions(document.getElementById("prizeList"), draw);
+    AdminUI.bindAddPrize(document.getElementById("addPrizeCard"), () => r.id, draw);
+  }
+  draw();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Campanha — Giovanna Matos</title>
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body data-nav="home">
+<main id="app"><div class="wrap" style="padding-top:20px;"><p class="note">Carregando...</p></div></main>
+
+<script src="/js/app.js"></script>
+<script>
+(async function () {
+  const { esc, api, money, pad6, mediaTag, TROPHY_ICON, CART_ICON, applyReward, rewardDescription } = App;
+  const id = App.qs("id");
+  const raffleReq = api("/raffles/" + encodeURIComponent(id)); // começa a buscar já, junto com o cabeçalho
+  raffleReq.catch(() => {});
+  // Dados da conta (benefício da roleta) também já começam a carregar; sem login a resposta só é ignorada.
+  const meReq = api("/me");
+  meReq.catch(() => {});
+  const session = await App.initPublic();
+  const app = document.getElementById("app");
+
+  let r;
+  try { r = await raffleReq; }
+  catch (e) { app.innerHTML = '<div class="wrap">' + App.emptyState("Campanha não encontrada", "Ela pode ter sido removida.", "/", "Voltar para campanhas") + "</div>"; return; }
+  document.title = r.title + " — Giovanna Matos";
+
+  // Benefício da roleta (só existe se o comprador estiver logado)
+  let reward = null;
+  if (session && session.type === "buyer") {
+    try { const me = await meReq; reward = me.activeReward; } catch (_) {}
+  }
+
+  const finished = r.status === "finished";
+  const pct = Math.min(100, (r.soldCount / r.totalNumbers) * 100);
+  const maxQty = Math.max(1, r.availableCount);
+  let qty = Math.min(maxQty, Math.max(0, parseInt(App.qs("qty"), 10) || 0));
+
+  function priceFor(q) {
+    let p = r.basePrice;
+    r.tiers.slice().sort((a, b) => a.minQty - b.minQty).forEach((t) => { if (q >= t.minQty) p = t.price; });
+    return p;
+  }
+
+  function federalInfo() {
+    if (!r.federalConcurso) return "";
+    const d = r.federalDate ? r.federalDate.split("-").reverse().join("/") : "";
+    return `<div class="federal-info">
+      <b>🎰 Loteria Federal</b> — concurso ${esc(r.federalConcurso)}${d ? " · " + d : ""}
+      <div class="federal-nums"><span>Número sorteado <b>${esc(r.federalNumber)}</b></span></div>
+      <small>${r.federalAdjusted ? "Ajustado ao intervalo da campanha" : ""}${r.federalAdjusted && r.federalFallback ? " · " : ""}${r.federalFallback ? "Número apurado não foi vendido, ganhou o próximo vendido" : ""}</small>
+    </div>`;
+  }
+
+  app.innerHTML = `
+    <div class="wrap">
+      <div class="breadcrumb"><a href="/">Campanhas</a> / ${esc(r.title)}</div>
+      <div class="detail-layout">
+        <div>
+          <div class="carousel"><div class="slide active ${r.photoUrl ? "has-photo" : ""}">${mediaTag(r)}</div></div>
+          <div class="titlebar">
+            <h1>${esc(r.title)}</h1>
+            <div class="status">${esc(App.firstWord(r.title))} ${finished ? "ENCERRADA" : "DISPONÍVEL"}</div>
+          </div>
+          <a href="/conta" class="mytickets-link">${CART_ICON} Meus títulos</a>
+
+          <details class="collapse" open>
+            <summary>Descrição / Regulamento</summary>
+            <div class="body" style="white-space:pre-line;">${esc(r.description)}</div>
+          </details>
+
+          ${r.prizeTitles.length ? `
+            <div class="prizes-head">
+              <h3>${TROPHY_ICON} Títulos Premiados</h3>
+              <span class="count">${r.prizeTitles.filter((p) => p.status !== "won").length}/${r.prizeTitles.length}</span>
+            </div>
+            ${r.prizeTitles.map((p) => `
+              <div class="prize-item ${p.status === "won" ? "is-won" : ""}">
+                <span class="numpill">${pad6(p.number)}</span>
+                <span class="label">${esc(p.label)}</span>
+                <span class="state ${p.status !== "won" ? "available" : "won"}">${p.status !== "won" ? "Disponível" : "🏆 " + esc(p.winnerName || "Ganhou")}</span>
+              </div>`).join("")}` : ""}
+        </div>
+
+        <div class="right-col">
+          <div class="progress-wrap">
+            <div class="progress-track"><div class="progress-fill" style="width:${pct}%">${pct.toFixed(2)}%</div></div>
+            <div class="price-line">Por apenas<b id="unitPriceLabel">${money(priceFor(qty))}</b></div>
+          </div>
+
+          ${!finished && r.tiers.length ? `
+            <div class="promo-box">
+              <div class="head">🎁 Promoção <span class="dim">Compre mais barato!</span></div>
+              <div class="tier-row">${r.tiers.map((t) => `<span class="tier-chip">A partir de ${t.minQty} pague ${money(t.price)} <span class="off">-${Math.round((1 - t.price / r.basePrice) * 100)}%</span></span>`).join("")}</div>
+            </div>` : ""}
+
+          ${!finished && r.flash && new Date(r.flash.endsAt) > new Date() ? `
+            <div class="flash-box">
+              <div class="head">🎁 ${esc(r.flash.label)}</div>
+              <div class="timer" id="flashTimer">--:--</div>
+              <p>${esc(r.flash.text)}</p>
+            </div>` : ""}
+
+          ${finished ? `
+            <div class="draw-box" style="margin-top:20px;">
+              <span>Número sorteado</span>
+              <div class="winner-num">${r.winnerNumber ? pad6(r.winnerNumber) : "—"}</div>
+              <p>Ganhador(a): ${esc(r.winnerName || "—")}</p>
+              ${federalInfo()}
+            </div>` : maxQty <= 0 || r.availableCount <= 0 ? `
+            <div class="draw-box" style="margin-top:20px;"><p>Todos os títulos desta campanha já foram vendidos! Aguarde o sorteio.</p></div>` : `
+            <div class="qty-grid" id="qtyGrid">
+              ${[30, 50, 100, 200].map((n) => `<div class="qty-opt" data-n="${n}">${n === 50 ? '<span class="badge-pop">Mais popular</span>' : ""}<b>+${n}</b><span>SELECIONAR</span></div>`).join("")}
+            </div>
+            <div class="stepper-row">
+              <div class="stepper">
+                <button id="qMinus" type="button">−</button>
+                <input id="qtyInput" value="${qty}" inputmode="numeric">
+                <button id="qPlus" type="button">+</button>
+              </div>
+              <button class="btn btn-primary cta-buy" id="buyBtn" type="button">✓ Quero participar<span id="buyTotal" style="margin-left:6px;"></span></button>
+            </div>
+            <div id="rewardBox"></div>
+            <div id="buyError"></div>
+            <p class="note">Quanto mais títulos, mais chances de ganhar! Os números são sorteados automaticamente para você.</p>
+            ${!session ? `<p class="note">Para comprar você precisa ter uma conta — é rápido, e é lá que seus títulos e prêmios ficam guardados.</p>` : ""}`}
+        </div>
+      </div>
+    </div>`;
+
+  // Contagem regressiva da promoção relâmpago
+  if (r.flash && document.getElementById("flashTimer")) {
+    const el = document.getElementById("flashTimer");
+    const tick = () => {
+      const diff = new Date(r.flash.endsAt) - Date.now();
+      if (diff <= 0) { el.textContent = "Encerrado"; return; }
+      const m = Math.floor(diff / 60000), s = Math.floor((diff % 60000) / 1000);
+      el.textContent = "Encerra em " + String(m).padStart(2, "0") + ":" + String(s).padStart(2, "0");
+    };
+    tick(); setInterval(tick, 1000);
+  }
+
+  if (finished || r.availableCount <= 0) return;
+
+  function refresh() {
+    document.querySelectorAll(".qty-opt").forEach((el) => el.classList.toggle("active", parseInt(el.dataset.n, 10) === qty));
+    document.getElementById("qtyInput").value = qty;
+    const unit = priceFor(qty);
+    const priced = applyReward(unit * qty, reward ? { type: reward.type, value: reward.value } : null);
+    document.getElementById("unitPriceLabel").textContent = money(unit);
+    document.getElementById("buyTotal").textContent = money(priced.final);
+    const box = document.getElementById("rewardBox");
+    if (reward && (priced.discount > 0 || priced.bonus > 0)) {
+      box.innerHTML = `<div class="reward-box">🎁 Benefício da roleta ativo: ${esc(rewardDescription(reward.type, reward.value))}.
+        ${priced.discount > 0 ? `Você economiza <b>${money(priced.discount)}</b> (de ${money(unit * qty)} por ${money(priced.final)}).` : ""}
+        ${priced.bonus > 0 ? `Você leva <b>+${priced.bonus}</b> título(s) de bônus.` : ""}</div>`;
+    } else box.innerHTML = "";
+  }
+  document.querySelectorAll(".qty-opt").forEach((el) => (el.onclick = () => { qty = Math.min(maxQty, parseInt(el.dataset.n, 10)); refresh(); }));
+  document.getElementById("qMinus").onclick = () => { qty = Math.max(0, qty - 1); refresh(); };
+  document.getElementById("qPlus").onclick = () => { qty = Math.min(maxQty, qty + 1); refresh(); };
+  document.getElementById("qtyInput").oninput = (e) => {
+    const v = parseInt(e.target.value.replace(/\D/g, ""), 10) || 0;
+    qty = Math.max(0, Math.min(maxQty, v)); refresh();
+  };
+
+  document.getElementById("buyBtn").onclick = async () => {
+    const err = document.getElementById("buyError");
+    err.innerHTML = "";
+    if (qty < 1) { App.toast("Escolha pelo menos 1 título para participar."); return; }
+    if (!session) {
+      // Sem conta? Leva para o cadastro e volta aqui depois.
+      location.href = "/conta?m=cadastro&next=" + encodeURIComponent("/rifa?id=" + r.id + "&qty=" + qty);
+      return;
+    }
+    if (session.type === "admin") { App.toast("Você está logado como administrador. Entre com uma conta de comprador para comprar."); return; }
+    const btn = document.getElementById("buyBtn");
+    btn.disabled = true; btn.textContent = "Gerando Pix...";
+    try {
+      const out = await api("/checkout", { method: "POST", body: { raffleId: r.id, quantity: qty } });
+      location.href = "/checkout?id=" + encodeURIComponent(out.ticketId);
+    } catch (e) {
+      btn.disabled = false; btn.innerHTML = '✓ Quero participar<span id="buyTotal" style="margin-left:6px;"></span>';
+      err.innerHTML = '<div class="alert">' + esc(e.message) + "</div>";
+      refresh();
+    }
+  };
+  refresh();
+})();
+</script>
+</body>
+</html>
